@@ -60,7 +60,7 @@ This project leverages **ipset** and **iptables** to block all traffic to domain
 
 5. Update Blocked Domains
 
-   - Edit `/etc/linux-domain-blocker/domains.list` to add or remove domains.
+   - Now on, edit `/etc/linux-domain-blocker/domains.list` to add or remove domains.
    - The script will automatically update the blocklist every 5 minutes, or you can run:
 
    ```bash
