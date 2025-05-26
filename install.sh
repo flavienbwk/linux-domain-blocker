@@ -22,40 +22,34 @@ fi
 ipset create $IPSET_NAME hash:ip family inet timeout 300 2>/dev/null || true
 ipset create $IPSET_NAME-v6 hash:ip family inet6 timeout 300 2>/dev/null || true
 
-# Base firewall rules
-add_iptables_rule() {
-    # IPv4 rules
-    if ! iptables -C "$@" 2>/dev/null; then
-        iptables -I "$@"
-    fi
-    
-    # IPv6 rules
-    if ! ip6tables -C "$@" 2>/dev/null; then
-        ip6tables -I "$@"
-    fi
-}
-
 # Main blocking rules
-add_iptables_rule OUTPUT -m set --match-set $IPSET_NAME dst -j DROP
-add_iptables_rule OUTPUT -m set --match-set $IPSET_NAME-v6 dst -j DROP
+iptables -I OUTPUT -m set --match-set $IPSET_NAME dst -j DROP
+ip6tables -I OUTPUT -m set --match-set $IPSET_NAME-v6 dst -j DROP
 
 # Docker container blocking
-add_iptables_rule DOCKER-USER -m set --match-set $IPSET_NAME src -j DROP
-add_iptables_rule DOCKER-USER -m set --match-set $IPSET_NAME-v6 src -j DROP
+iptables -I DOCKER-USER -m set --match-set $IPSET_NAME src -j DROP || true
+ip6tables -I DOCKER-USER -m set --match-set $IPSET_NAME-v6 src -j DROP || true
 
-# Allow established connections first
-add_iptables_rule DOCKER-USER -m state --state RELATED,ESTABLISHED -j ACCEPT
+# Docker - Allow established connections first
+iptables -I DOCKER-USER -m state --state RELATED,ESTABLISHED -j ACCEPT || true
 
 # UFW-specific configuration
 if $UFW_ACTIVE; then
-    tee -a /etc/ufw/after.rules >/dev/null <<EOL
+    # Only add rules if they are not already present
+    if ! grep -q "# domain-blocker-rule (ipv4)" /etc/ufw/after.rules; then
+        tee -a /etc/ufw/after.rules >/dev/null <<EOL
 
 # domain-blocker-rule (ipv4)
 -A ufw-after-output -m set --match-set $IPSET_NAME dst -j DROP
+EOL
+    fi
+    if ! grep -q "# domain-blocker-rule (ipv6)" /etc/ufw/after6.rules; then
+        tee -a /etc/ufw/after6.rules >/dev/null <<EOL
 
 # domain-blocker-rule (ipv6)
 -A ufw6-after-output -m set --match-set $IPSET_NAME-v6 dst -j DROP
 EOL
+    fi
     ufw reload
 fi
 
@@ -68,15 +62,16 @@ chmod +x $SCRIPT_DIR/update_blocked_domains.sh
 [ -f domains.list ] && cp domains.list $DOMAINS_FILE
 
 # Create systemd service
-tee /etc/systemd/system/domain-blocker.service >/dev/null <<EOL
+tee /etc/systemd/system/linux-domain-blocker.service >/dev/null <<EOL
 [Unit]
 Description=Domain Blocker IPSet Restore
-Before=network.target
+After=network.target
+Before=ufw.service
 
 [Service]
 Type=oneshot
+ExecStartPre=-/sbin/ipset create blocked_domains hash:ip family inet timeout 300
 ExecStart=/sbin/ipset restore -file /etc/iptables/ipset
-ExecStartPost=/sbin/ipset restore -file /etc/iptables/ipset-v6
 
 [Install]
 WantedBy=multi-user.target
@@ -84,7 +79,7 @@ EOL
 
 # Enable services
 systemctl daemon-reload
-systemctl enable domain-blocker.service
+systemctl enable linux-domain-blocker.service
 
 # Cron job
 if ! crontab -l | grep -q "$SCRIPT_DIR/update_blocked_domains.sh"; then

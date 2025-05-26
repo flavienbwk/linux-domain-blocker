@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -x
 
 IPSET_NAME="blocked_domains"
 DOMAINS_FILE="/etc/linux-domain-blocker/domains.list"
@@ -20,13 +20,13 @@ for domain in "${DOMAINS[@]}"; do
     # IPv4
     ips4=$(dig +short "$domain" A | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
     for ip in $ips4; do
-        ipset add $TMP4 "$ip" 2>/dev/null
+        ipset add $TMP4 "$ip" 2>/dev/null || true
     done
     
     # IPv6
     ips6=$(dig +short "$domain" AAAA | grep -E '^[0-9a-fA-F:]+$')
     for ip in $ips6; do
-        ipset add $TMP6 "$ip" 2>/dev/null
+        ipset add $TMP6 "$ip" 2>/dev/null || true
     done
 done
 
@@ -39,6 +39,7 @@ ipset destroy $TMP4 2>/dev/null || true
 ipset destroy $TMP6 2>/dev/null || true
 
 # Save for persistence
+mkdir -p /etc/iptables
 ipset save > /etc/iptables/ipset
 ipset save > /etc/iptables/ipset-v6
 
