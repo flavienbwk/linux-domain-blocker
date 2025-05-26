@@ -7,7 +7,7 @@ DOMAINS_FILE="/etc/linux-domain-blocker/domains.list"
 SCRIPT_DIR="/etc/linux-domain-blocker"
 
 # Install core dependencies
-if ! dpkg -l | grep -qE 'ipset|dnsutils'; then
+if ! dpkg -s ipset >/dev/null 2>&1 || ! dpkg -s dnsutils >/dev/null 2>&1; then
     apt-get update
     apt-get install -y --no-install-recommends ipset dnsutils
 fi
