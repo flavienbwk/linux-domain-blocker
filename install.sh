@@ -3,54 +3,93 @@ set -e
 
 # Configuration
 IPSET_NAME="blocked_domains"
-IPTABLES_COMMENT="domain-blocker-rule"
 DOMAINS_FILE="/etc/linux-domain-blocker/domains.list"
 SCRIPT_DIR="/etc/linux-domain-blocker"
 
-# Install dependencies
-if ! command -v ipset >/dev/null 2>&1 || ! command -v iptables >/dev/null 2>&1 || ! command -v host >/dev/null 2>&1; then
+# Install core dependencies
+if ! dpkg -l | grep -qE 'ipset|dnsutils'; then
     apt-get update
-    apt-get install -y --no-install-recommends ipset iptables-persistent dnsutils
+    apt-get install -y --no-install-recommends ipset dnsutils
 fi
 
-# Create ipset if not exists
-if ! ipset list -n | grep -q "^${IPSET_NAME}\$"; then
-    ipset create $IPSET_NAME hash:ip timeout 300
+# Detect UFW
+UFW_ACTIVE=false
+if command -v ufw >/dev/null && ufw status | grep -q 'active'; then
+    UFW_ACTIVE=true
 fi
 
-# Add iptables rule if not exists
-if ! iptables -C OUTPUT -m set --match-set $IPSET_NAME dst -j DROP 2>/dev/null; then
-    iptables -I OUTPUT 1 -m set --match-set $IPSET_NAME dst -j DROP -m comment --comment "$IPTABLES_COMMENT"
-fi
+# Create ipset (atomic update compatible)
+ipset create $IPSET_NAME hash:ip family inet timeout 300 2>/dev/null || true
+ipset create $IPSET_NAME-v6 hash:ip family inet6 timeout 300 2>/dev/null || true
 
-# Ensure Docker bridge network also drops these IPs
-DOCKER_BRIDGE="docker0"
-if ip link show $DOCKER_BRIDGE >/dev/null 2>&1; then
-    # Block from containers to blocked IPs
-    if ! iptables -C FORWARD -i $DOCKER_BRIDGE -m set --match-set $IPSET_NAME dst -j DROP 2>/dev/null; then
-        iptables -I FORWARD 1 -i $DOCKER_BRIDGE -m set --match-set $IPSET_NAME dst -j DROP -m comment --comment "${IPTABLES_COMMENT}-docker"
+# Base firewall rules
+add_iptables_rule() {
+    # IPv4 rules
+    if ! iptables -C "$@" 2>/dev/null; then
+        iptables -I "$@"
     fi
-    # Block from host to containers if needed (optional, usually OUTPUT covers host)
+    
+    # IPv6 rules
+    if ! ip6tables -C "$@" 2>/dev/null; then
+        ip6tables -I "$@"
+    fi
+}
+
+# Main blocking rules
+add_iptables_rule OUTPUT -m set --match-set $IPSET_NAME dst -j DROP
+add_iptables_rule OUTPUT -m set --match-set $IPSET_NAME-v6 dst -j DROP
+
+# Docker container blocking
+add_iptables_rule DOCKER-USER -m set --match-set $IPSET_NAME src -j DROP
+add_iptables_rule DOCKER-USER -m set --match-set $IPSET_NAME-v6 src -j DROP
+
+# Allow established connections first
+add_iptables_rule DOCKER-USER -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+# UFW-specific configuration
+if $UFW_ACTIVE; then
+    tee -a /etc/ufw/after.rules >/dev/null <<EOL
+
+# domain-blocker-rule (ipv4)
+-A ufw-after-output -m set --match-set $IPSET_NAME dst -j DROP
+
+# domain-blocker-rule (ipv6)
+-A ufw6-after-output -m set --match-set $IPSET_NAME-v6 dst -j DROP
+EOL
+    ufw reload
 fi
 
-# Create config directory
-mkdir -p /etc/linux-domain-blocker
-
-# Install update script
+# Persistence setup
+mkdir -p $SCRIPT_DIR
 cp update_blocked_domains.sh $SCRIPT_DIR/
 chmod +x $SCRIPT_DIR/update_blocked_domains.sh
 
 # Install domains list
 [ -f domains.list ] && cp domains.list $DOMAINS_FILE
 
-# Create cron job if not exists
-if ! crontab -u root -l | grep -q "$SCRIPT_DIR/update_blocked_domains.sh"; then
-    (crontab -u root -l 2>/dev/null; echo "*/5 * * * * $SCRIPT_DIR/update_blocked_domains.sh") | crontab -u root -
-fi
+# Create systemd service
+tee /etc/systemd/system/domain-blocker.service >/dev/null <<EOL
+[Unit]
+Description=Domain Blocker IPSet Restore
+Before=network.target
 
-# Persist rules
-ipset save | tee /etc/iptables/ipset >/dev/null
-netfilter-persistent save
+[Service]
+Type=oneshot
+ExecStart=/sbin/ipset restore -file /etc/iptables/ipset
+ExecStartPost=/sbin/ipset restore -file /etc/iptables/ipset-v6
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+# Enable services
+systemctl daemon-reload
+systemctl enable domain-blocker.service
+
+# Cron job
+if ! crontab -l | grep -q "$SCRIPT_DIR/update_blocked_domains.sh"; then
+    (crontab -l 2>/dev/null; echo "*/5 * * * * $SCRIPT_DIR/update_blocked_domains.sh") | crontab -
+fi
 
 # Initial update
 $SCRIPT_DIR/update_blocked_domains.sh

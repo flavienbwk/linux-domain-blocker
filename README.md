@@ -12,6 +12,8 @@ This project leverages **ipset** and **iptables** to block all traffic to domain
 - **No third-party libraries:** Only standard Linux tools
 - **Idempotent and safe:** Won't duplicate rules or sets
 - **Easy to manage:** Just edit a text file to add/remove domains
+- **Compatible with UFW**: no use of iptables-persistance
+- **Compatible with Docker**: Blocks domains inside Docker containers
 
 ## 🚀 Installation
 
