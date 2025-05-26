@@ -8,7 +8,7 @@ DOMAINS_FILE="/etc/linux-domain-blocker/domains.list"
 SCRIPT_DIR="/etc/linux-domain-blocker"
 
 # Install dependencies
-if ! dpkg -l | grep -qE 'ipset|iptables-persistent|dnsutils'; then
+if ! command -v ipset >/dev/null 2>&1 || ! command -v iptables >/dev/null 2>&1 || ! command -v host >/dev/null 2>&1; then
     sudo apt-get update
     sudo apt-get install -y --no-install-recommends ipset iptables-persistent dnsutils
 fi
