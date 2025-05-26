@@ -34,8 +34,8 @@ chmod +x $SCRIPT_DIR/update_blocked_domains.sh
 [ -f domains.list ] && cp domains.list $DOMAINS_FILE
 
 # Create cron job if not exists
-if ! crontab -l | grep -q "$SCRIPT_DIR/update_blocked_domains.sh"; then
-    (crontab -l 2>/dev/null; echo "*/5 * * * * $SCRIPT_DIR/update_blocked_domains.sh") | crontab -
+if ! crontab -u root -l | grep -q "$SCRIPT_DIR/update_blocked_domains.sh"; then
+    (crontab -u root -l 2>/dev/null; echo "*/5 * * * * $SCRIPT_DIR/update_blocked_domains.sh") | crontab -u root -
 fi
 
 # Persist rules
