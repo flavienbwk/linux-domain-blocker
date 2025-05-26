@@ -3,6 +3,8 @@
 Block outgoing connections to specific domains on your machine - using only native Linux tools!  
 This project leverages **ipset** and **iptables** to block all traffic to domains you specify, automatically updating IPs as DNS changes.
 
+:warning: This is an experimental project. Do **not** use for production.
+
 ## ✨ Features
 
 - **Blocks outgoing connections** to any domains you list
